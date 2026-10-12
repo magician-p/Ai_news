@@ -6,7 +6,7 @@ checkpoint/summary/*
 !checkpoint/summary/.gitkeep
 
 data/processed/*
-data/raw/*
+data/raw/news.csv
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
