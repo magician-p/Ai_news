@@ -47,7 +47,7 @@ def pretrained_model_path(type:Literal['classify', 'summary']):
 LOG_ROOT = PROJECT_ROOT / "logs"
 
 # 检查点路径
-CHECKPOINT_ROOT = PROJECT_ROOT / "checkpoints"
+CHECKPOINT_ROOT = PROJECT_ROOT / "checkpoint"
 
 # 序列长度（BERT / BART 位置编码上限均为 512，超出必须截断）
 MAX_INPUT_LENGTH = 512

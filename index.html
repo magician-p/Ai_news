@@ -106,7 +106,7 @@
             elements.submitButton.disabled = true;
             elements.submitButton.textContent = '正在处理...';
             const content = elements.userInput.value;
-            const response = await fetch('/news_classify_summarize', {
+            const response = await fetch('/summary', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: content })

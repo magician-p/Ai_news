@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from transformers import AutoModel
+from transformers.models.bart.modeling_bart import shift_tokens_right
 
 
 class ClassifyModel(nn.Module):
@@ -16,7 +17,8 @@ class ClassifyModel(nn.Module):
     
     def load_model(self, load_path):
         self.bert = AutoModel.from_pretrained(load_path)
-        self.fc = torch.load(load_path / 'fc.pt')
+        fc_state_dict = torch.load(load_path / 'fc.pt')
+        self.fc.load_state_dict(fc_state_dict)
 
     def forward(self, input_ids, token_type_ids, attention_mask, labels):
         outputs = self.bert(
@@ -53,14 +55,21 @@ class SummaryModel(nn.Module):
     
     def load_model(self, load_path):
         self.bart = AutoModel.from_pretrained(load_path)
-        self.fc = torch.load(load_path / 'fc.pt')
+        fc_state_dict = torch.load(load_path / 'fc.pt')
+        self.fc.load_state_dict(fc_state_dict)
 
-    def forward(self, input_ids, token_type_ids, attention_mask, labels):
+    def forward(self, input_ids, attention_mask, labels, token_type_ids=None, decoder_input_ids=None):
+        # BART 不接受 token_type_ids，因此这里不再往下传
+        # BartModel 没有 labels 参数，若不显式给 decoder_input_ids，它会拿 input_ids 右移当解码输入，
+        # 导致解码长度=正文长度(512) 与 labels 长度(摘要长度) 对不上，必须自己由 labels 右移构造
+        if decoder_input_ids is None:
+            decoder_input_ids = shift_tokens_right(
+                labels, self.bart.config.pad_token_id, self.bart.config.decoder_start_token_id
+            )
         outputs = self.bart(
             input_ids=input_ids,
-            token_type_ids=token_type_ids,
             attention_mask=attention_mask,
-            labels=labels
+            decoder_input_ids=decoder_input_ids
         )
         logits = self.fc(outputs.last_hidden_state) # (B, T, H) -> (B, T, V)
         loss = self.loss_fn(logits.permute(0, 2, 1), labels)
@@ -69,27 +78,29 @@ class SummaryModel(nn.Module):
             'logits': logits,
         }
 
-    def generate(self, input_ids, token_type_ids, attention_mask):
+    def generate(self, input_ids, attention_mask, token_type_ids = None, max_length=64):
         memery = self.bart.encoder(
             input_ids=input_ids,
-            token_type_ids=token_type_ids,
             attention_mask=attention_mask
         )
-        decoder_input_ids = torch.tensor([self.bart.config.decoder_start_token_id] * input_ids.shape[0]).to(input_ids.device) # (B, 1)
-        decoder_hidden_states = memery.last_hidden_state
+        decoder_input_ids = torch.full(
+            (input_ids.shape[0], 1),
+            self.bart.config.decoder_start_token_id,
+            dtype=torch.long,
+            device=input_ids.device
+        ) # (B, 1)
         is_finished = torch.zeros(input_ids.shape[0], dtype=torch.bool).to(input_ids.device)
         while True:
             outputs = self.bart.decoder(
                 input_ids=decoder_input_ids,
-                token_type_ids=token_type_ids,
-                attention_mask=attention_mask,
-                encoder_hidden_states=decoder_hidden_states,
+                attention_mask=None,
+                encoder_hidden_states=memery.last_hidden_state,
                 encoder_attention_mask=attention_mask
             )
             logits = self.fc(outputs.last_hidden_state) # (B, T, H) -> (B, T, V)
-            pred_ids = torch.argmax(logits[:, -1, :], dim=-1) # (B, V) -> (B, 1)
+            pred_ids = torch.argmax(logits[:, -1, :], dim=-1).unsqueeze(-1) # (B, V) -> (B)
             decoder_input_ids = torch.cat([decoder_input_ids, pred_ids], dim=-1)
-            decoder_hidden_states = outputs.last_hidden_state
+            pred_ids = pred_ids.masked_fill(is_finished, self.bart.config.pad_token_id)
             is_finished = is_finished | (pred_ids.squeeze(-1) == self.bart.config.eos_token_id)
             if is_finished.all():
                 break

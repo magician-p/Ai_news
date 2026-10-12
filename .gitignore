@@ -11,8 +11,10 @@ data/processed/*
 logs/*
 !logs/.gitkeep
 
-models/*
-!models/.gitkeep
+models/classify/*
+models/summary/*
+!models/classify/.gitkeep
+!models/summary/.gitkeep
 
 pretrained/bart-base-chinese/*
 pretrained/bert-base-chinese/*
